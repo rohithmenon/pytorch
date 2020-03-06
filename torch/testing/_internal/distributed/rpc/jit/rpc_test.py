@@ -4,7 +4,7 @@ from typing import Dict, Tuple
 import torch
 import torch.distributed.rpc as rpc
 from torch import Tensor
-from torch.testing._internal.dist_utils import dist_init
+from torch.testing._internal.dist_utils import dist_init, worker_name
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
@@ -456,7 +456,7 @@ class JitRpcAsyncOpTest:
 class JitRpcTest(JitRpcAsyncOpTest, RpcAgentTestFixture):
     @dist_init
     def test_torchscript_function(self):
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
         local_ret = one_arg(torch.ones(2, 2))
         ret = rpc.rpc_sync(dst_worker_name, one_arg, args=(torch.ones(2, 2),))
         self.assertEqual(ret, local_ret)
@@ -464,13 +464,13 @@ class JitRpcTest(JitRpcAsyncOpTest, RpcAgentTestFixture):
         self.assertEqual(rref.to_here(), local_ret)
         # create rref to itself
         local_rref = rpc.remote(
-            "worker{}".format(self.rank), one_arg, args=(torch.ones(2, 2),)
+            worker_name(self.rank), one_arg, args=(torch.ones(2, 2),)
         )
         self.assertEqual(local_rref.to_here(), local_ret)
 
     @dist_init
     def test_torchscript_function_exception(self):
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
         with self.assertRaisesRegex(RuntimeError, r"one_arg\(\) expected at most"):
             ret = rpc.rpc_sync(dst_worker_name, one_arg, args=(10, 20))
 
@@ -491,28 +491,28 @@ class JitRpcTest(JitRpcAsyncOpTest, RpcAgentTestFixture):
             RuntimeError, "attempted to get undefined function"
         ):
             ret = rpc._rpc_sync_torchscript(
-                "worker{}".format(dst_rank), MyScriptClass, args=()
+                worker_name(dst_rank), MyScriptClass, args=()
             )
-        ret = rpc.rpc_sync("worker{}".format(dst_rank), MyScriptClass, args=())
+        ret = rpc.rpc_sync(worker_name(dst_rank), MyScriptClass, args=())
 
         with self.assertRaisesRegex(
             RuntimeError, "attempted to get undefined function"
         ):
             ret = rpc._rpc_sync_torchscript(
-                "worker{}".format(dst_rank), MyScriptModule, args=(self.rank,)
+                worker_name(dst_rank), MyScriptModule, args=(self.rank,)
             )
 
         with self.assertRaisesRegex(
             RuntimeError, "attempted to get undefined function"
         ):
             ret = rpc._rpc_sync_torchscript(
-                "worker{}".format(dst_rank), MyScriptModule(self.rank).forward, args=()
+                worker_name(dst_rank), MyScriptModule(self.rank).forward, args=()
             )
         # Python 3.5 and Python 3.6 throw different error message, the only
         # common word can be greped is "pickle".
         with self.assertRaisesRegex(Exception, "pickle"):
             ret = rpc.rpc_sync(
-                "worker{}".format(dst_rank), MyScriptModule(self.rank).forward, args=()
+                worker_name(dst_rank), MyScriptModule(self.rank).forward, args=()
             )
 
     @dist_init
@@ -523,23 +523,23 @@ class JitRpcTest(JitRpcAsyncOpTest, RpcAgentTestFixture):
 
         # create rref on current rank
         rref = rpc.remote(
-            "worker{}".format(self.rank), one_arg, args=(torch.ones(2, 2),)
+            worker_name(self.rank), one_arg, args=(torch.ones(2, 2),)
         )
 
         # pass rref to another user in rpc call
-        ret = rpc.rpc_sync("worker{}".format(dst_rank), rref_to_here, args=(rref,))
+        ret = rpc.rpc_sync(worker_name(dst_rank), rref_to_here, args=(rref,))
         self.assertEqual(ret, local_ret)
 
         # return rref in rpc call
-        rref1 = rpc.rpc_sync("worker{}".format(dst_rank), return_rref, args=(rref,))
+        rref1 = rpc.rpc_sync(worker_name(dst_rank), return_rref, args=(rref,))
         self.assertEqual(rref1.to_here(), local_ret)
 
         # pass rref to another user in remote call
-        rref2 = rpc.remote("worker{}".format(dst_rank), rref_to_here, args=(rref,))
+        rref2 = rpc.remote(worker_name(dst_rank), rref_to_here, args=(rref,))
         self.assertEqual(rref2.to_here(), local_ret)
 
         # return rref in remote call
-        rref3 = rpc.remote("worker{}".format(dst_rank), return_rref, args=(rref,))
+        rref3 = rpc.remote(worker_name(dst_rank), return_rref, args=(rref,))
         self.assertEqual(rref3.to_here().to_here(), local_ret)
 
     @dist_init
@@ -557,12 +557,12 @@ class JitRpcTest(JitRpcAsyncOpTest, RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         remote_ref = rpc.remote(
-            "worker{}".format(dst_rank), construct_my_script_module, args=(self.rank,)
+            worker_name(dst_rank), construct_my_script_module, args=(self.rank,)
         )
 
         # pass rref arg to owner
         ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank),
+            worker_name(dst_rank),
             run_ref_script_module,
             args=(remote_ref, torch.ones(self.rank)),
         )
@@ -572,7 +572,7 @@ class JitRpcTest(JitRpcAsyncOpTest, RpcAgentTestFixture):
     def test_rref_is_owner(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        rref_var = rpc_return_rref("worker{}".format(dst_rank))
+        rref_var = rpc_return_rref(worker_name(dst_rank))
 
         @torch.jit.script
         def rref_tensor_is_owner(rref_var):
@@ -587,7 +587,7 @@ class JitRpcTest(JitRpcAsyncOpTest, RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
 
-        module_with_rrefs = MyScriptModuleWithRRefs("worker{}".format(dst_rank))
+        module_with_rrefs = MyScriptModuleWithRRefs(worker_name(dst_rank))
         res = module_with_rrefs()
         self.assertEqual(res, torch.ones(2, 2) * 9)
 
@@ -595,7 +595,7 @@ class JitRpcTest(JitRpcAsyncOpTest, RpcAgentTestFixture):
     def test_rref_python_annotation(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        rref_var = rpc_return_rref("worker{}".format(dst_rank))
+        rref_var = rpc_return_rref(worker_name(dst_rank))
 
         res = rref_script_annotation(rref_var)
         self.assertEqual(res, torch.ones(2, 2) + 1)
