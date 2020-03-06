@@ -610,6 +610,7 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
      {{0.0000, 0.0000,  0.3723},
       {0.0000, 0.0000,  0.3723},
       {0.0000, 0.0000,  0.3723}}});
+    std::cout << std::get<0>(rnn_output) << std::endl;
     ASSERT_TRUE(torch::allclose(std::get<0>(rnn_output), expected_output, 1e-05, 2e-04));
   }
   {
